@@ -91,7 +91,7 @@ class RobiAssistant:
             "temperature": 0.8, # Adjusted temperature slightly
             "top_p": 0.95,
             "top_k": 40,
-            "max_output_tokens": 2048, # Reduced slightly from notebook default
+            "max_output_tokens": 2048, # Reduced slightly from notebook default 8192
             "response_mime_type": "text/plain",
         }
         # Basic safety settings - adjust as needed
