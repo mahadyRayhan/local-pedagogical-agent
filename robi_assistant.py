@@ -52,7 +52,7 @@ class RobiAssistant:
         embedding_model_id: str = "text-embedding-004",
         generative_model_id: str = "gemini-2.0-flash", # Updated model ID
         user_name: str = "User", # Default user name
-        chunk_size: int = 512,
+        chunk_size: int = 1500,
         embedding_output_dim: int = 768,
         top_k_chunks: int = 3,
         generation_config: Dict | None = None,
@@ -88,10 +88,10 @@ class RobiAssistant:
 
         # --- Setup Generative Model ---
         self.generation_config = generation_config or {
-            "temperature": 0.8, # Adjusted temperature slightly
+            "temperature": 1, # Adjusted temperature slightly
             "top_p": 0.95,
             "top_k": 40,
-            "max_output_tokens": 2048, # Reduced slightly from notebook default 8192
+            "max_output_tokens": 8192, # Reduced slightly from notebook default 8192
             "response_mime_type": "text/plain",
         }
         # Basic safety settings - adjust as needed
@@ -449,7 +449,7 @@ class RobiAssistant:
         prompt_generation_start_time = asyncio.get_event_loop().time()
         final_prompt = self._generate_prompt(query, user_name).format(context=context_str or "No specific context found.")
         prompt_generation_time = asyncio.get_event_loop().time() - prompt_generation_start_time
-        print(f"Generated prompt:\n{final_prompt}") # Optional: log the full prompt
+        # print(f"Generated prompt:\n{final_prompt}") # Optional: log the full prompt
 
         # 3. Generate the answer using the LLM
         generation_start_time = asyncio.get_event_loop().time()

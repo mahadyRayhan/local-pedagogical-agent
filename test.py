@@ -80,7 +80,10 @@ if __name__ == "__main__":
         "How can I tell if I'm about to exceed the budget before finalizing my settings?",
         "What does the pie chart on the Server Load Display tell me about my current setup?",
         "If I accidentally overspend, can I undo user additions to recover budget?",
-        "How do I match the Request Frequency and Traffic Volume sliders to exactly level 9?"
+        "How do I match the Request Frequency and Traffic Volume sliders to exactly level 9?",
+        "I am at Server Room 5, how can i succees here?",
+        "I am at Server Room 4, how can i succees here?",
+        "I am at Server Room 3, how can i succees here?"
     ]
 
     for question in questions:
