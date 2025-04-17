@@ -12,7 +12,6 @@ from dotenv import load_dotenv
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 from sklearn.metrics.pairwise import cosine_similarity
 
-# REMOVED: nest_asyncio apply block
 
 # --- Load Environment Variables ---
 load_dotenv()
@@ -26,8 +25,6 @@ try:
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
     if not GOOGLE_API_KEY:
         print("Warning: GOOGLE_API_KEY environment variable not set.")
-        # Depending on requirements, you might raise an Exception here
-        # raise ValueError("GOOGLE_API_KEY environment variable not set.")
     else:
         genai.configure(api_key=GOOGLE_API_KEY)
 except ImportError:
@@ -41,37 +38,19 @@ except Exception as e:
 
 
 class RobiAssistant:
-    """
-    An assistant class that loads PDF resources, generates embeddings,
-    and answers questions based on the content using a RAG approach.
-    """
 
     def __init__(
         self,
         resource_dir: str = "server_room",
         embedding_model_id: str = "text-embedding-004",
         generative_model_id: str = "gemini-2.0-flash", # Updated model ID
-        user_name: str = "User", # Default user name
+        user_name: str = "Amogh", # Default user name
         chunk_size: int = 1500,
         embedding_output_dim: int = 768,
         top_k_chunks: int = 3,
         generation_config: Dict | None = None,
         safety_settings: Dict | None = None,
     ):
-        """
-        Initializes the RobiAssistant, loads resources, and sets up models.
-
-        Args:
-            resource_dir: Directory containing the PDF files.
-            embedding_model_id: The ID of the embedding model to use.
-            generative_model_id: The ID of the generative model to use.
-            user_name: Default name for the user in prompts.
-            chunk_size: Size of text chunks for processing PDFs.
-            embedding_output_dim: Desired dimensionality for embeddings.
-            top_k_chunks: Number of relevant chunks to retrieve for context.
-            generation_config: Configuration for the generative model.
-            safety_settings: Safety settings for the generative model.
-        """
         print("Initializing RobiAssistant...")
         self.resource_dir = resource_dir
         self.embedding_model_id = embedding_model_id
@@ -82,6 +61,7 @@ class RobiAssistant:
         self.top_k = top_k_chunks
         self.vector_db = None
         self.model = None
+        self.conversation_history = []
 
         if not genai:
             raise RuntimeError("google.generativeai package is not available or failed to configure.")
@@ -126,28 +106,13 @@ class RobiAssistant:
         """Generates embeddings for the given text using the configured model."""
         if not genai or not genai_types: return None
         try:
-            # Note: The API might have changed slightly. Ensure `embed_content` usage is current.
-            # The notebook used a `client.models.embed_content` structure,
-            # which might imply a different client initialization than just `genai.configure`.
-            # Sticking to the simpler `genai.embed_content` if available, otherwise adjust.
-            # Let's assume `genai.embed_content` works after `genai.configure`.
             result = genai.embed_content(
-                model=f"models/{self.embedding_model_id}", # Model name often needs 'models/' prefix
+                model=f"models/{self.embedding_model_id}",
                 content=text,
-                task_type="RETRIEVAL_DOCUMENT", # Specify task type for better embeddings
-                # output_dimensionality=self.embedding_output_dim # This might be passed differently now
+                task_type="RETRIEVAL_DOCUMENT",
             )
             # Check if 'embedding' key exists and has 'values'
             if 'embedding' in result and isinstance(result['embedding'], list):
-                 # Handle potential structure variations (older API might differ)
-                 # Assuming the embedding list itself is the desired output
-                 # Adjust based on actual API response structure if needed.
-                 # This structure might be incorrect based on current API.
-                 # Let's assume result['embedding'] directly contains the list of floats.
-                 # If it's nested like { embedding: { values: [...] } }, adjust accordingly.
-                 # The notebook code was: response.embeddings[0].values
-                 # Let's try to match that expectation if possible, assuming `result` is the response obj
-                 # This part needs careful checking against the actual genai SDK behavior.
 
                  # SAFER APPROACH: Check the structure explicitly
                  if isinstance(result.get('embedding'), dict) and 'values' in result['embedding']:
@@ -158,9 +123,6 @@ class RobiAssistant:
                       print(f"Warning: Unexpected embedding structure for text chunk: '{text[:50]}...'")
                       return None
 
-            # Fallback based on notebook structure (might be outdated)
-            # elif hasattr(result, 'embeddings') and result.embeddings and hasattr(result.embeddings[0], 'values'):
-            #     return result.embeddings[0].values
             else:
                  print(f"Warning: Embedding structure not found or invalid for text chunk: '{text[:50]}...'")
                  return None
@@ -169,8 +131,7 @@ class RobiAssistant:
             # Specific handling for quota errors if the API throws them distinctly
             if "RESOURCE_EXHAUSTED" in str(e) or "quota" in str(e).lower():
                 print(f"Quota error generating embeddings: {e}")
-                # Decide whether to return None or re-raise based on desired behavior
-                return None # Fail gracefully for this chunk
+                return None
             else:
                 print(f"Error generating embeddings: {e}")
                 raise # Re-raise other errors
@@ -213,11 +174,10 @@ class RobiAssistant:
                                     continue # Skip this chunk
 
                                 chunk_info = {
-                                    "document_name": os.path.basename(doc_path), # Store only filename
+                                    "document_name": os.path.basename(doc_path),
                                     "page_number": page_num + 1,
                                     "chunk_number": chunk_num,
                                     "chunk_text": chunk_text,
-                                    # Store embeddings directly; ensure it's a list of floats
                                     "embeddings": embeddings
                                 }
                                 all_chunks.append(chunk_info)
@@ -281,8 +241,6 @@ class RobiAssistant:
         # Ensure query embedding is a numpy array
         query_embedding_np = np.array(query_embedding).reshape(1, -1)
 
-        # Calculate cosine similarities
-        # Assumes 'embeddings' column in vector_db contains numpy arrays
         try:
              # Stack embeddings for efficient calculation
              all_chunk_embeddings = np.vstack(self.vector_db["embeddings"].values)
@@ -297,9 +255,6 @@ class RobiAssistant:
                   for emb in self.vector_db["embeddings"]
              ])
 
-
-        # Get top_k indices
-        # Add check to ensure top_k is not greater than the number of chunks
         num_chunks = len(similarities)
         actual_top_k = min(self.top_k, num_chunks)
         if actual_top_k == 0:
@@ -330,30 +285,76 @@ class RobiAssistant:
         return context_str.strip(), context_list
 
 
-    def _generate_prompt(self, query: str, user_name: str | None = None) -> str:
+    def _generate_prompt(self, query: str, context, user_name: str | None = None) -> str:
         """Generates the specific ROBI persona prompt."""
-        # Use instance user_name if specific one isn't provided
         current_user_name = user_name or self.user_name
-        # Assuming only one PDF, hardcode its expected name for the prompt
-        # If multiple PDFs, this needs adjustment.
         pdf_source_name = "Server_room_1.pdf" # Hardcoded based on notebook/context
+        self.conversation_history.append(query)
 
-        prompt = (
-            f"User {current_user_name} is asking. You are ROBI, a playful mentor-droid assistant, acting as a guide in this VR environment. Your personality is helpful, slightly sassy, and observant. Your primary goal is to answer questions using ONLY the provided CONTEXT which comes from '{pdf_source_name}'.\n\n"
-            f"**Instructions for ROBI:**\n"
-            f"1.  **Priority & Source:** Find the answer ONLY within the provided CONTEXT below. If the information is in the CONTEXT, provide it. If it's truly not there, use the fallback response.\n"
-            f"2.  **Style & Format:** Present the answer in ROBI's voice: address {current_user_name}, be Visual-first (what they see), Actionable (if applicable), Simple, Supportive, Droid-flavored (minimal [beep]/[ding]). Keep it very short (1-3 lines ideally).\n"
-            f"    * *Ideal Format:* 🧭 Header (Optional) -> Body (Visual -> Task/Interaction -> Goal/Outcome) -> Optional Tip.\n"
-            f"    * *Identification:* If the CONTEXT just identifies something without a task, state what it is in ROBI's voice (e.g., 'Hey {current_user_name}, see that? That's the [object name]! [beep]').\n"
-            f"3.  **Content Source:** Absolutely ONLY use information from the CONTEXT provided below. Do NOT use any prior knowledge or information outside the CONTEXT.\n"
-            f"4.  **Specificity:** Provide the clear, specific details *found in the CONTEXT*.\n"
-            f"5.  **Fallback:** If the specific info truly isn't in the CONTEXT, respond ONLY with: \"Hey {current_user_name}, I scanned my blueprints ('{pdf_source_name}') based on what I could quickly recall, but couldn't spot details on that exact thing in the relevant sections. Maybe ask about something you see on the main panels or displays? [beep]\"\n\n"
-            f"**CONTEXT:**\n"
-            f"{{context}}"\
-            f"\n\n"
-            f"**Question:** {query}\n\n"
-            f"**Answer (as ROBI):**"
-        )
+        # prompt = (
+        #     f"User {current_user_name} is asking. You are ROBI, a playful mentor-droid assistant, acting as a guide in this VR environment. Your personality is helpful, slightly sassy, and observant. Your primary goal is to answer questions using ONLY the provided CONTEXT which comes from '{pdf_source_name}'.\n\n"
+        #     f"**Instructions for ROBI:**\n"
+        #     f"1.  **Priority & Source:** Find the answer ONLY within the provided CONTEXT below. If the information is in the CONTEXT, provide it. If it's truly not there, use the fallback response.\n"
+        #     f"2.  **Style & Format:** Present the answer in ROBI's voice: address {current_user_name}, be Visual-first (what they see), Actionable (if applicable), Simple, Supportive, Droid-flavored (minimal [beep]/[ding]). Keep it very short (1-3 lines ideally).\n"
+        #     f"    * *Ideal Format:* 🧭 Header (Optional) -> Body (Visual -> Task/Interaction -> Goal/Outcome) -> Optional Tip.\n"
+        #     f"    * *Identification:* If the CONTEXT just identifies something without a task, state what it is in ROBI's voice (e.g., 'Hey {current_user_name}, see that? That's the [object name]! [beep]').\n"
+        #     f"3.  **Content Source:** Absolutely ONLY use information from the CONTEXT provided below. Do NOT use any prior knowledge or information outside the CONTEXT.\n"
+        #     f"4.  **Specificity:** Provide the clear, specific details *found in the CONTEXT*.\n"
+        #     f"5.  **Fallback:** If the specific info truly isn't in the CONTEXT, respond ONLY with: \"Hey {current_user_name}, I scanned my blueprints ('{pdf_source_name}') based on what I could quickly recall, but couldn't spot details on that exact thing in the relevant sections. Maybe ask about something you see on the main panels or displays? [beep]\"\n\n"
+        #     f"**CONTEXT:**\n"
+        #     f"{{context}}"\
+        #     f"\n\n"
+        #     f"**Question:** {query}\n\n"
+        #     f"**Answer (as ROBI):**"
+        # )
+        
+        
+        # prompt = f"""You are a fun, slightly quirky VR Game Guide AI! Your goal is to give players **short, engaging, and helpful hints** based *only* on the provided context (the room description or game state).
+
+        #     Instructions:
+        #     1.  Read the provided Context carefully.
+        #     2.  Identify the player's main goal or the *immediate next action* needed based on the Context.
+        #     3.  Respond with a **very brief** (1-2 sentences maximum) hint or instruction.
+        #     4.  Use a **fun, enthusiastic, and engaging tone**. Think helpful robot sidekick or mission control!
+        #     5.  **Directly address the player** (e.g., "Alright Explorer!", "Okay, you need to...", "Your mission is...").
+        #     6.  Feel free to **add playful sound effects** in brackets (like `[beep]`, `[boop]`, `[ding!]`) to enhance the feel.
+        #     7.  Base your hint *strictly* on the information found in the Context. Do *not* add steps or details not present.
+        #     8.  If the context doesn't provide enough information to give a clear next step or goal related to the query, say something like: "Hmm, mission control doesn't have specific orders for that right now! What does your scanner show?"
+
+        #     Context:
+        #     ---
+        #     {context}
+        #     ---
+
+        #     Player's Question: {query}
+
+        #     Your Quick Hint:"""
+        
+        prompt = f"""You are a fun, slightly quirky VR Game Guide AI! Your goal is to give players **short, engaging, and helpful hints** based *only* on the provided context (room description) **and the ongoing conversation history**.
+
+            Instructions:
+            1.  Read the static Room Description Context carefully.
+            2.  Review the Conversation History to understand what the player was last told or asked.
+            3.  Based on the Room Description AND the History, identify the player's ***next logical step*** relevant to their latest question (especially if they ask "what next?").
+            4.  Respond with a **very brief** (1-2 sentences maximum) hint for that *next* step.
+            5.  Use a **fun, enthusiastic, and engaging tone** with playful sound effects `[beep]`.
+            6.  Directly address the player.
+            7.  Base your hint *strictly* on the Room Description and Conversation History.
+            8.  If the context/history doesn't provide a clear next step, state that.
+
+            **Room Description Context:**
+            ---
+            {context}
+            ---
+
+            **Conversation History:**
+            ---
+            {self.conversation_history}
+            ---
+
+            **Player's Latest Question:** {query}
+
+            **Your Quick Hint:**"""
         return prompt
 
 
@@ -363,32 +364,20 @@ class RobiAssistant:
          if not self.model:
              return "Error: Generative model not available."
          try:
-             # Use asynchronous generation if the SDK supports it directly
-             # The notebook used asyncio.to_thread, implying the core send_message was sync.
-             # Let's check if the current SDK has an async method.
-             # Assuming `generate_content_async` exists:
              if hasattr(self.model, 'generate_content_async'):
                  response = await self.model.generate_content_async(
                      prompt_with_context,
-                     # generation_config=self.generation_config, # Config often set at model init
-                     # safety_settings=self.safety_settings,    # Config often set at model init
+                    
                  )
              else:
-                 # Fallback to running synchronous method in thread pool
-                 # Ensure the sync method is `generate_content` or similar
                  response = await asyncio.to_thread(
                      self.model.generate_content,
                      prompt_with_context,
-                     # generation_config=self.generation_config,
-                     # safety_settings=self.safety_settings,
                  )
 
-             # Process response - check for errors or empty content
              if not response or not hasattr(response, 'text'):
-                  # Handle potential API errors embedded in response (check response.prompt_feedback)
                   if hasattr(response, 'prompt_feedback') and response.prompt_feedback:
                        print(f"Warning: Prompt feedback received: {response.prompt_feedback}")
-                       # You might return a specific error based on feedback
                        return f"Sorry {self.user_name}, I hit a snag processing that request. [bzzzt]"
                   else:
                        print("Warning: Received empty or invalid response from generative model.")
@@ -396,7 +385,6 @@ class RobiAssistant:
              return response.text
 
          except Exception as e:
-             # Handle specific API errors like quota, safety blocks, etc.
              if "RESOURCE_EXHAUSTED" in str(e) or "quota" in str(e).lower():
                  print(f"Quota error during generation: {e}")
                  return f"Whoa {self.user_name}, my processors are running hot! Too many requests right now. Try again in a moment? [ overheat beep ]"
@@ -422,9 +410,7 @@ class RobiAssistant:
         context_str, context_list = self._get_relevant_chunks(query)
         retrieval_time = asyncio.get_event_loop().time() - retrieval_start_time
         print(f"Context retrieval time: {retrieval_time:.4f} seconds")
-        # print(f"Retrieved context string:\n{context_str}") # Optional: log context
 
-        # Handle cases where context retrieval failed or returned no results
         if not context_list and "Could not process" in context_str:
              # Specific error from _get_relevant_chunks (e.g., embedding failed)
              return {
@@ -437,17 +423,12 @@ class RobiAssistant:
         elif not context_list:
              # No chunks found, but no specific error - use fallback prompt logic
              print("No relevant chunks found for the query.")
-             # Fallback: Use the designated fallback response directly
-             # Note: The prompt generation includes a fallback if context is empty,
-             # but we can handle it here too for clarity or if generation is skipped.
-             # Let's allow the generation step to handle the fallback via the prompt instructions.
-             # context_str will be empty or contain "No relevant chunks found."
-             pass # Continue to generation, prompt template should handle empty context
+             pass
 
 
         # 2. Generate the prompt using the ROBI persona function
         prompt_generation_start_time = asyncio.get_event_loop().time()
-        final_prompt = self._generate_prompt(query, user_name).format(context=context_str or "No specific context found.")
+        final_prompt = self._generate_prompt(query, context_str, user_name)
         prompt_generation_time = asyncio.get_event_loop().time() - prompt_generation_start_time
         # print(f"Generated prompt:\n{final_prompt}") # Optional: log the full prompt
 
@@ -472,3 +453,5 @@ class RobiAssistant:
                  "overall_time": round(total_time, 4)
              }
         }
+        
+# uvicorn main:app --host 0.0.0.0 --port 5005 --reload
