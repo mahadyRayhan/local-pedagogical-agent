@@ -1,6 +1,8 @@
+import base64
 import requests
 import json
-import sys # Import sys for standard input/output handling
+import sys
+import os
 
 # --- Keep your existing functions ---
 def reload_resources(base_url="http://127.0.0.1:5005"):
@@ -22,27 +24,24 @@ def reload_resources(base_url="http://127.0.0.1:5005"):
         print("Error: Could not decode JSON response")
         return None
 
-def ask_question(query, base_url="http://127.0.0.1:5005"):
+def ask_question(query, image_data_base64, base_url="http://127.0.0.1:5005"):
     """
-    Sends a question to the /ask endpoint.
-
-    Args:
-        query (str): The question to ask.
+    Sends the query and BASE64 encoded image data via POST request.
     """
     url = f"{base_url}/ask"
-    # Removed the print statement from here to make interactive mode cleaner
-    # print(f"Testing: {url} with query: '{query}'")
+    payload = {"query": query, "image_data": image_data_base64}
+    headers = {'Content-Type': 'application/json'}
     try:
-        response = requests.get(url, params={"query": query})
+        # Use POST and send data as JSON
+        response = requests.post(url, headers=headers, json=payload)
         response.raise_for_status()
         data = response.json()
-        # print(f"Response: {data}") # Keep commented out for cleaner interaction
         return data
     except requests.exceptions.RequestException as e:
-        print(f"Error communicating with server: {e}") # More user-friendly error
+        print(f"Error occurred: {e}")
         return None
     except json.JSONDecodeError:
-        print("Error: Could not decode JSON response from server.")
+        print("Error: Could not decode JSON response")
         return None
 
 def health_check(base_url="http://127.0.0.1:5005"):
@@ -64,55 +63,61 @@ def health_check(base_url="http://127.0.0.1:5005"):
         print("Error: Could not decode JSON response during health check.")
         return None
 
-# --- Main execution block for interactive mode ---
+# --- Main execution block for interactive mode ---    
 if __name__ == "__main__":
-    # --- Initial Health Check ---
     print("Checking server health...")
     health_info = health_check()
     if not health_info or health_info.get('status') != 'ok':
         print("Server is not healthy or unreachable. Please check the server and try again.")
         sys.exit(1) # Exit if server isn't healthy
     print("Server health check passed. Ready to chat!")
-    print("Type your question and press Enter. Type 'quit' or 'exit' to leave.")
+    print("Type your question, followed by a comma and the image path (e.g., 'What is this?, my_image.png'). Type 'quit' or 'exit' to leave.")
     print("-" * 50)
 
-    # --- Interactive Loop ---
     while True:
         try:
-            # Get user input
-            user_query = input("You: ")
-
-            # Check for exit command
-            if user_query.lower() in ['quit', 'exit']:
+            user_input = input("You: ")
+            if user_input.lower() in ['quit', 'exit']:
                 break
 
-            # Handle empty input
-            if not user_query.strip():
+            parts = user_input.rsplit(",", 1)
+            query = parts[0].strip()
+            image_path_input = parts[1].strip() if len(parts) > 1 else ''
+
+            if not query:
+                print("AI: Please enter a question.")
                 continue
 
-            # Send the question to the server
-            response_data = ask_question(user_query)
+            encoded_image_data = None
+            if image_path_input:
+                if os.path.exists(image_path_input):
+                    try:
+                        with open(image_path_input, "rb") as image_file:
+                            # Read image bytes and encode to Base64
+                            encoded_image_data = base64.b64encode(image_file.read()).decode('utf-8')
+                    except Exception as e:
+                        print(f"AI: Error reading or encoding image file '{image_path_input}': {e}")
+                        continue # Skip this turn if image reading fails
+                else:
+                    print(f"AI: Image file not found at path: {image_path_input}")
+                    continue # Skip if file doesn't exist
 
-            # Process and print the response
+            # Only proceed if we have a query (image is optional, handled by server if None)
+            response_data = ask_question(query, encoded_image_data) # Send query and encoded image (or None)
+
+            # ... (rest of the response handling logic - remains the same) ...
             if response_data:
                 answer_text = response_data.get('answer', "Sorry, I didn't receive a proper answer.")
-                # Handle if the answer is unexpectedly a list (like in your original code)
                 if isinstance(answer_text, list):
                     answer_text = answer_text[0] if answer_text else "Received an empty answer list."
-
-                # Ensure answer_text is a string before stripping
                 if not isinstance(answer_text, str):
                      answer_text = str(answer_text)
-
                 print(f"AI:  {answer_text.strip()}")
             else:
-                # Error message was already printed by ask_question in case of failure
                 print("AI:  Sorry, I couldn't get a response from the server.")
-
-            print("-" * 10) # Small separator for clarity
+            print("-" * 10)
 
         except (KeyboardInterrupt, EOFError):
-            # Handle Ctrl+C or Ctrl+D gracefully
             break
 
     print("\n" + "=" * 50)

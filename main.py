@@ -2,11 +2,13 @@
 
 import os
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Body
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 import asyncio # Import asyncio
 from typing import Any, List, Dict, Tuple
+
+from pydantic import BaseModel # Import BaseModel
 
 # Import the assistant class
 from robi_assistant import RobiAssistant
@@ -24,6 +26,12 @@ app = FastAPI(
 
 # --- Global variable to hold the assistant instance ---
 robi_instance: RobiAssistant | None = None
+
+# Define a Pydantic model for the request body
+class AskRequest(BaseModel):
+    query: str
+    image_data: str | None = None # Base64 encoded image string, optional
+
 
 # --- Startup Event ---
 @app.on_event("startup")
@@ -47,32 +55,27 @@ async def startup_event():
         # raise e
 
 # --- API Endpoints ---
-@app.get("/ask", tags=["Query"], response_model=Dict) # Define response model if possible
-async def ask_question(
-    query: str = Query(..., description="The question to ask ROBI assistant.")
-):
+@app.post("/ask", tags=["Query"], response_model=Dict)
+async def ask_question(request_data: AskRequest = Body(...)): # Receive data from request body
     """
-    Sends a query to the ROBI assistant and returns the answer.
+    Sends a query and optional base64 image data to the ROBI assistant
+    and returns the answer.
     """
     if robi_instance is None:
-        raise HTTPException(
-            status_code=503, # Service Unavailable
-            detail="ROBI Assistant is not available due to initialization failure."
-        )
-    if not query:
-        raise HTTPException(status_code=400, detail="Query parameter cannot be empty.")
+        raise HTTPException(status_code=503, detail="ROBI Assistant is not available...")
+    if not request_data.query:
+        raise HTTPException(status_code=400, detail="Query cannot be empty.")
 
+    print(f"Received query: '{request_data.query}' with image data: {'Provided' if request_data.image_data else 'None'}")
     try:
-        # Call the assistant's ask method asynchronously
-        result = await robi_instance.ask(query) # Pass the query
-
-        # Return the entire result dictionary
+        # Pass the query and the base64 image string (or None)
+        result = await robi_instance.ask(query=request_data.query, player_view_img_data=request_data.image_data)
         return JSONResponse(content=result, status_code=200)
 
     except Exception as e:
-        print(f"Error processing query '{query}': {e}")
-        # Provide a more generic error message to the client
-        raise HTTPException(status_code=500, detail=f"An internal error occurred while processing the query.")
+        print(f"Error processing query '{request_data.query}': {e}")
+        raise HTTPException(status_code=500, detail="Internal error.")
+
 
 @app.get("/health", tags=["System"])
 async def health_check():

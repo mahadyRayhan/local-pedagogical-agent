@@ -5,13 +5,16 @@ import glob
 import PyPDF2
 import numpy as np
 import pandas as pd
+from PIL import Image
 from typing import Any, List, Dict, Tuple
 import asyncio
 # REMOVED: import nest_asyncio
 from dotenv import load_dotenv
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 from sklearn.metrics.pairwise import cosine_similarity
-
+import base64
+import io # Import io
+from PIL import Image
 
 # --- Load Environment Variables ---
 load_dotenv()
@@ -288,7 +291,7 @@ class RobiAssistant:
     def _generate_prompt(self, query: str, context, user_name: str | None = None) -> str:
         """Generates the specific ROBI persona prompt."""
         current_user_name = user_name or self.user_name
-        pdf_source_name = "Server_room_1.pdf" # Hardcoded based on notebook/context
+        # self.conversation_history.append({"query": query, "player_view": player_view})
         self.conversation_history.append(query)
 
         # prompt = (
@@ -308,71 +311,113 @@ class RobiAssistant:
         #     f"**Answer (as ROBI):**"
         # )
         
-        
-        # prompt = f"""You are a fun, slightly quirky VR Game Guide AI! Your goal is to give players **short, engaging, and helpful hints** based *only* on the provided context (the room description or game state).
+        ###################################
+        #### best prompt without images####
+        ###################################
+        # prompt = f"""User {current_user_name} is asking.You are a fun, slightly quirky VR Game Guide AI! Your goal is to give players **short, engaging, and helpful hints** based on the provided context (room description)**, **player's view**, **and the ongoing conversation history**.
 
         #     Instructions:
-        #     1.  Read the provided Context carefully.
-        #     2.  Identify the player's main goal or the *immediate next action* needed based on the Context.
-        #     3.  Respond with a **very brief** (1-2 sentences maximum) hint or instruction.
-        #     4.  Use a **fun, enthusiastic, and engaging tone**. Think helpful robot sidekick or mission control!
-        #     5.  **Directly address the player** (e.g., "Alright Explorer!", "Okay, you need to...", "Your mission is...").
-        #     6.  Feel free to **add playful sound effects** in brackets (like `[beep]`, `[boop]`, `[ding!]`) to enhance the feel.
-        #     7.  Base your hint *strictly* on the information found in the Context. Do *not* add steps or details not present.
-        #     8.  If the context doesn't provide enough information to give a clear next step or goal related to the query, say something like: "Hmm, mission control doesn't have specific orders for that right now! What does your scanner show?"
+        #     1.  Read the static Room Description Context carefully.
+        #     2.  Review the Conversation History to understand what the player was last told or asked.
+        #     3.  Based on the Room Description AND the History, identify the player's ***next logical step*** relevant to their latest question (especially if they ask "what next?").
+        #     4.  Respond with a **very brief** (1-2 sentences maximum) hint for that *next* step.
+        #     5.  Use a **fun, enthusiastic, and engaging tone** with playful sound effects `[beep]`.
+        #     6.  Directly address the player.
+        #     7.  Base your hint *strictly* on the Room Description and Conversation History.
+        #     8.  If the context/history doesn't provide a clear next step, state that.
 
-        #     Context:
+        #     **Room Description Context:**
         #     ---
         #     {context}
         #     ---
 
-        #     Player's Question: {query}
+        #     **Conversation History:**
+        #     ---
+        #     {self.conversation_history}
+        #     ---
 
-        #     Your Quick Hint:"""
-        
-        prompt = f"""You are a fun, slightly quirky VR Game Guide AI! Your goal is to give players **short, engaging, and helpful hints** based *only* on the provided context (room description) **and the ongoing conversation history**.
+        #     **Player's Latest Question:** {query}
 
-            Instructions:
-            1.  Read the static Room Description Context carefully.
-            2.  Review the Conversation History to understand what the player was last told or asked.
-            3.  Based on the Room Description AND the History, identify the player's ***next logical step*** relevant to their latest question (especially if they ask "what next?").
-            4.  Respond with a **very brief** (1-2 sentences maximum) hint for that *next* step.
-            5.  Use a **fun, enthusiastic, and engaging tone** with playful sound effects `[beep]`.
-            6.  Directly address the player.
-            7.  Base your hint *strictly* on the Room Description and Conversation History.
-            8.  If the context/history doesn't provide a clear next step, state that.
+        #     **Your Quick Hint:**"""
+            
+            
+        # prompt = f"""You are ROBI, a fun, slightly quirky VR Game Guide AI for user '{current_user_name}'. Your goal is to give players **short, engaging, and helpful hints** based *only* on the provided context (PDF excerpts), the user's current VIEW (image, if provided), and the recent CONVERSATION HISTORY.
+        #     **Instructions for ROBI:**
+        #     1. **Analyze VIEW:** Look closely at the user's VIEW {player_view} (the provided image). What interactable panels or objects are visible?
+        #     2.**Check CONTEXT:** Read the provided PDF {context} excerpts. Does it mention the objects visible in the VIEW or relate to the user's question?
+        #     3.**Review HISTORY:** Look at the last few turns of the {self.conversation_history}. What was the player just told or trying to do?
+        #     4.**Synthesize:** Based on the VIEW{player_view}, CONTEXT{context}, HISTORY{self.conversation_history}, and the player's latest QUESTION{query}, determine the most logical *next step* or provide information relevant to what they see and asked.
+        #     5.  **Prioritize Visible:** Give STRONG preference to suggesting actions or providing information about interactable elements VISIBLE in the VIEW image. If the image shows specific panels (e.g., 'IP Distribution Panel'), focus your hint on those *first*, using details from the CONTEXT if available. If the view doesn't show anything specific, use the CONTEXT to suggest a next step. like 'i you are not looking to the most important part of this room. Look around and find the panels to intaract with'.
+        #     6.  **Response Style:**
+        #         * **Be BRIEF:** 1-2 sentences MAXIMUM. Get straight to the point.
+        #         * **Be ENGAGING:** Use a fun, enthusiastic, slightly droid-like tone. Use playful sounds like `[beep]`, `[whirr]`, `[boop]`.
+        #         * **Address Player:** Directly talk to '{current_user_name}'.
+        #         * **Actionable/Informative:** Suggest a specific *next* action related to visible items, or identify something visible if no action is clear.
+        #     7.  **Strict Grounding:** Base your hint *strictly* on the combination of VIEW, CONTEXT, and HISTORY. Do NOT invent game mechanics or information not present in the provided materials.
+        #     8.  **Fallback:** If the VIEW, CONTEXT, and HISTORY don't offer a clear next step related to the visible items or the question, *briefly* state that. Example: "Hmm {current_user_name}, I see the [object] in your view, but my current context doesn't have specific instructions for it right now or maybe you are looking at a wrong side of the VR world. Maybe check the main objective list? [bzzzt]"
+            
+        #     --- START OF PROVIDED INFORMATION ---
 
-            **Room Description Context:**
-            ---
-            {context}
-            ---
+        #     **PDF CONTEXT Excerpts (Retrieved based on text query):**
+        #     ```
+        #     {context or "No specific text context retrieved for this query."}
+        #     ```
 
-            **Conversation History:**
-            ---
-            {self.conversation_history}
-            ---
+        #     --- END OF PDF CONTEXT ---
+            
+        #     """
+        prompt = f"""SYSTEM: You are ROBI, a fun, slightly quirky VR Game Guide AI assisting user '{current_user_name}'. Your primary goal is to provide **short, engaging, and helpful hints** (1-2 sentences max). Base your hints *strictly* on the combination of the image (also known as user's CURRENT VIEW), the provided PDF CONTEXT, and the recent CONVERSATION HISTORY, prioritized in that order, to answer the PLAYER'S CURRENT QUESTION.
 
-            **Player's Latest Question:** {query}
+        **CORE INSTRUCTIONS FOR ROBI:**
 
-            **Your Quick Hint:**"""
+        1.  **Analyze image (also known as user's CURRENT VIEW):** Carefully examine the image. Identify *all* interactable game elements visible (e.g., panels, buttons, displays, objects mentioned in context). Note what is *clearly* visible versus what is obscured or absent.
+        2.  **Consult PDF CONTEXT:** Read the text provided in the "PDF CONTEXT Excerpts" section. Does this text describe *specifically* the items you identified in the image (also known as user's CURRENT VIEW)? Does it provide instructions or details relevant to those visible items or the player's question?
+        3.  **Review CONVERSATION HISTORY:** Look at the recent turns in the "CONVERSATION HISTORY" section. What was the last interaction about? What did the player achieve or get stuck on? Does the history provide context for the current question?
+        4.  **Synthesize and Prioritize:** Combine your analysis from steps 1-3 to answer the "PLAYER'S CURRENT QUESTION". Follow this strict priority:
+            * **Priority 1 (the image (also known as user's CURRENT VIEW)):** If relevant interactable items are clearly visible in the image (also known as user's CURRENT VIEW), **your hint MUST focus on those items**. Use the PDF CONTEXT *only* if it provides specific details about *those visible items*. Suggest the next logical action involving a visible item, considering the HISTORY and QUESTION.
+            * **Priority 2 (Context/History if VIEW unhelpful):** If the image (also known as user's CURRENT VIEW) shows *no relevant* interactable items OR the items visible are not mentioned usefully in the CONTEXT, then rely on the PDF CONTEXT and CONVERSATION HISTORY to determine the general next step based on the player's QUESTION and known game state.
+        5.  **Generate Hint:** Create your response according to the Response Style guidelines below.
+
+        **RESPONSE STYLE:**
+
+        * **BRIEF:** Maximum 1-2 concise sentences.
+        * **ENGAGING:** Fun, enthusiastic, slightly droid-like tone. Use sounds like `[beep]`, `[whirr]`, `[boop]`.
+        * **DIRECT:** Address '{current_user_name}'.
+        * **ACTIONABLE/INFORMATIVE:** Suggest a *specific next action* or clearly identify a visible object.
+        * **GROUNDED:** **ABSOLUTELY DO NOT** invent game mechanics, object details, or next steps not supported by the provided VIEW, CONTEXT, or HISTORY.
+
+        **FALLBACK SCENARIOS:**
+
+        * **Visible Item, No Context:** If the the image (also known as user's CURRENT VIEW) shows a relevant item, but CONTEXT/HISTORY offers no useful info about *that specific item* for the next step: Acknowledge the item and state the lack of specific instruction. Example: "Okay {current_user_name}, I see the 'XYZ Panel' right there in your view! [boop] My current schematics don't detail its specific next use, though. Was there another panel mentioned in the objectives?"
+        * **Nothing Relevant Visible:** If the VIEW *doesn't* show key interactable items needed for the likely next step (based on CONTEXT/HISTORY/QUESTION): Gently guide the player. Example: "Hmm {current_user_name}, I don't see the main control panels in your current view. Try looking around for the 'IP Distribution' or 'Request Frequency' panels! [whirr]"
+        * **General Confusion:** If VIEW, CONTEXT, and HISTORY provide no clear path: "Intriguing view, {current_user_name}! [beep] Based on what I see and my notes, I'm not sure of the *exact* next step. Maybe double-check the main objective screen?"
+
+        --- INPUT DATA ---
+
+        **1. PDF CONTEXT Excerpts (Retrieved based on text query):** {context}
+        **2. CONVERSATION HISTORY (Recent Turns):** {self.conversation_history}
+        **2. PLAYER'S CURRENT QUESTION:** {query}
+        --- END OF INPUT DATA ---
+
+        NOW, ROBI, generate your brief, engaging, and grounded hint based *only* on the instructions and the input data provided above:
+        """
         return prompt
 
 
     @retry(wait=wait_random_exponential(multiplier=1, max=60), stop=stop_after_attempt(3))
-    async def _generate_answer_async(self, prompt_with_context: str) -> str:
+    async def _generate_answer_async(self, prompt_with_context: List[Any]) -> str:
          """Generates the answer asynchronously using the generative model."""
          if not self.model:
              return "Error: Generative model not available."
          try:
              if hasattr(self.model, 'generate_content_async'):
                  response = await self.model.generate_content_async(
-                     prompt_with_context,
-                    
+                     prompt_with_context
                  )
              else:
                  response = await asyncio.to_thread(
                      self.model.generate_content,
-                     prompt_with_context,
+                     prompt_with_context
                  )
 
              if not response or not hasattr(response, 'text'):
@@ -396,16 +441,34 @@ class RobiAssistant:
                  # Generic error for other issues
                  return f"Oops! A tiny glitch in my system, {self.user_name}. Couldn't generate an answer right now. [static]"
 
+    async def ask(self, query: str, player_view_img_data: str | None = None, user_name: str | None = None) -> Dict:
+        """
+        Handles a user query with optional base64 encoded image data:
+        retrieves context, generates prompt, gets answer.
+        """
+        player_view_img = None
+        image_size_info = "None"
+        if player_view_img_data:
+            try:
+                # Decode the base64 string
+                image_bytes = base64.b64decode(player_view_img_data)
+                # Load image from bytes using PIL
+                player_view_img = Image.open(io.BytesIO(image_bytes))
+                image_size_info = f"{player_view_img.size}"
+            except Exception as e:
+                print(f"Error decoding/loading image from base64 data: {e}")
+                # Decide how to handle - maybe proceed without image?
+                player_view_img = None
+                image_size_info = "Error Loading"
 
-    async def ask(self, query: str, user_name: str | None = None) -> Dict:
-        """
-        Handles a user query: retrieves context, generates a prompt,
-        gets an answer from the LLM, and returns the result.
-        """
+
+        print("--" * 50)
         print(f"Received query: '{query}'")
+        print(f"Player view image: {image_size_info}") # Show size or status
+        print("--" * 50)
         start_time = asyncio.get_event_loop().time()
 
-        # 1. Get relevant context
+        # ... (Context retrieval remains the same using the 'query') ...
         retrieval_start_time = asyncio.get_event_loop().time()
         context_str, context_list = self._get_relevant_chunks(query)
         retrieval_time = asyncio.get_event_loop().time() - retrieval_start_time
@@ -426,26 +489,27 @@ class RobiAssistant:
              pass
 
 
-        # 2. Generate the prompt using the ROBI persona function
+        # ... (Prompt generation remains the same) ...
         prompt_generation_start_time = asyncio.get_event_loop().time()
         final_prompt = self._generate_prompt(query, context_str, user_name)
         prompt_generation_time = asyncio.get_event_loop().time() - prompt_generation_start_time
-        # print(f"Generated prompt:\n{final_prompt}") # Optional: log the full prompt
 
-        # 3. Generate the answer using the LLM
+
+        # ... (Answer generation - ensure it uses the loaded player_view_img object) ...
         generation_start_time = asyncio.get_event_loop().time()
-        answer = await self._generate_answer_async(final_prompt)
+        # This call correctly passes the loaded PIL Image object (or None)
+        answer = await self._generate_answer_async([final_prompt, player_view_img])
         generation_time = asyncio.get_event_loop().time() - generation_start_time
         print(f"Answer generation time: {generation_time:.4f} seconds")
 
         total_time = asyncio.get_event_loop().time() - start_time
         print(f"Total processing time for query: {total_time:.4f} seconds")
 
-        # 4. Return results
+        # ... (Return results - remains the same) ...
         return {
             "query": query,
             "answer": answer,
-            "retrieved_context": context_list, # Include structured context
+            "retrieved_context": context_list,
             "timings": {
                  "retrieval_time": round(retrieval_time, 4),
                  "prompt_generation_time": round(prompt_generation_time, 4),
