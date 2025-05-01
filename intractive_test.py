@@ -71,7 +71,7 @@ if __name__ == "__main__":
         print("Server is not healthy or unreachable. Please check the server and try again.")
         sys.exit(1) # Exit if server isn't healthy
     print("Server health check passed. Ready to chat!")
-    print("Type your question, followed by a comma and the image path (e.g., 'What is this?, my_image.png'). Type 'quit' or 'exit' to leave.")
+    print("Type your question, followed by a semicolon and the image path (e.g., 'What is this?; my_image.png'). Type 'quit' or 'exit' to leave.")
     print("-" * 50)
 
     while True:
@@ -80,10 +80,13 @@ if __name__ == "__main__":
             if user_input.lower() in ['quit', 'exit']:
                 break
 
-            parts = user_input.rsplit(",", 1)
-            query = parts[0].strip()
-            image_path_input = parts[1].strip() if len(parts) > 1 else ''
-
+            parts = user_input.rsplit(";", 1)
+            if len(parts) == 1:
+                query = parts[0].strip()
+                image_path_input = ''
+            else:
+                query = ",".join(parts[:-1]).strip()
+                image_path_input = parts[-1].strip()
             if not query:
                 print("AI: Please enter a question.")
                 continue

@@ -293,23 +293,6 @@ class RobiAssistant:
         current_user_name = user_name or self.user_name
         # self.conversation_history.append({"query": query, "player_view": player_view})
         self.conversation_history.append(query)
-
-        # prompt = (
-        #     f"User {current_user_name} is asking. You are ROBI, a playful mentor-droid assistant, acting as a guide in this VR environment. Your personality is helpful, slightly sassy, and observant. Your primary goal is to answer questions using ONLY the provided CONTEXT which comes from '{pdf_source_name}'.\n\n"
-        #     f"**Instructions for ROBI:**\n"
-        #     f"1.  **Priority & Source:** Find the answer ONLY within the provided CONTEXT below. If the information is in the CONTEXT, provide it. If it's truly not there, use the fallback response.\n"
-        #     f"2.  **Style & Format:** Present the answer in ROBI's voice: address {current_user_name}, be Visual-first (what they see), Actionable (if applicable), Simple, Supportive, Droid-flavored (minimal [beep]/[ding]). Keep it very short (1-3 lines ideally).\n"
-        #     f"    * *Ideal Format:* 🧭 Header (Optional) -> Body (Visual -> Task/Interaction -> Goal/Outcome) -> Optional Tip.\n"
-        #     f"    * *Identification:* If the CONTEXT just identifies something without a task, state what it is in ROBI's voice (e.g., 'Hey {current_user_name}, see that? That's the [object name]! [beep]').\n"
-        #     f"3.  **Content Source:** Absolutely ONLY use information from the CONTEXT provided below. Do NOT use any prior knowledge or information outside the CONTEXT.\n"
-        #     f"4.  **Specificity:** Provide the clear, specific details *found in the CONTEXT*.\n"
-        #     f"5.  **Fallback:** If the specific info truly isn't in the CONTEXT, respond ONLY with: \"Hey {current_user_name}, I scanned my blueprints ('{pdf_source_name}') based on what I could quickly recall, but couldn't spot details on that exact thing in the relevant sections. Maybe ask about something you see on the main panels or displays? [beep]\"\n\n"
-        #     f"**CONTEXT:**\n"
-        #     f"{{context}}"\
-        #     f"\n\n"
-        #     f"**Question:** {query}\n\n"
-        #     f"**Answer (as ROBI):**"
-        # )
         
         ###################################
         #### best prompt without images####
@@ -340,32 +323,6 @@ class RobiAssistant:
 
         #     **Your Quick Hint:**"""
             
-            
-        # prompt = f"""You are ROBI, a fun, slightly quirky VR Game Guide AI for user '{current_user_name}'. Your goal is to give players **short, engaging, and helpful hints** based *only* on the provided context (PDF excerpts), the user's current VIEW (image, if provided), and the recent CONVERSATION HISTORY.
-        #     **Instructions for ROBI:**
-        #     1. **Analyze VIEW:** Look closely at the user's VIEW {player_view} (the provided image). What interactable panels or objects are visible?
-        #     2.**Check CONTEXT:** Read the provided PDF {context} excerpts. Does it mention the objects visible in the VIEW or relate to the user's question?
-        #     3.**Review HISTORY:** Look at the last few turns of the {self.conversation_history}. What was the player just told or trying to do?
-        #     4.**Synthesize:** Based on the VIEW{player_view}, CONTEXT{context}, HISTORY{self.conversation_history}, and the player's latest QUESTION{query}, determine the most logical *next step* or provide information relevant to what they see and asked.
-        #     5.  **Prioritize Visible:** Give STRONG preference to suggesting actions or providing information about interactable elements VISIBLE in the VIEW image. If the image shows specific panels (e.g., 'IP Distribution Panel'), focus your hint on those *first*, using details from the CONTEXT if available. If the view doesn't show anything specific, use the CONTEXT to suggest a next step. like 'i you are not looking to the most important part of this room. Look around and find the panels to intaract with'.
-        #     6.  **Response Style:**
-        #         * **Be BRIEF:** 1-2 sentences MAXIMUM. Get straight to the point.
-        #         * **Be ENGAGING:** Use a fun, enthusiastic, slightly droid-like tone. Use playful sounds like `[beep]`, `[whirr]`, `[boop]`.
-        #         * **Address Player:** Directly talk to '{current_user_name}'.
-        #         * **Actionable/Informative:** Suggest a specific *next* action related to visible items, or identify something visible if no action is clear.
-        #     7.  **Strict Grounding:** Base your hint *strictly* on the combination of VIEW, CONTEXT, and HISTORY. Do NOT invent game mechanics or information not present in the provided materials.
-        #     8.  **Fallback:** If the VIEW, CONTEXT, and HISTORY don't offer a clear next step related to the visible items or the question, *briefly* state that. Example: "Hmm {current_user_name}, I see the [object] in your view, but my current context doesn't have specific instructions for it right now or maybe you are looking at a wrong side of the VR world. Maybe check the main objective list? [bzzzt]"
-            
-        #     --- START OF PROVIDED INFORMATION ---
-
-        #     **PDF CONTEXT Excerpts (Retrieved based on text query):**
-        #     ```
-        #     {context or "No specific text context retrieved for this query."}
-        #     ```
-
-        #     --- END OF PDF CONTEXT ---
-            
-        #     """
         prompt = f"""SYSTEM: You are ROBI, a fun, slightly quirky VR Game Guide AI assisting user '{current_user_name}'. Your primary goal is to provide **short, engaging, and helpful hints** (1-2 sentences max). Base your hints *strictly* on the combination of the image (also known as user's CURRENT VIEW), the provided PDF CONTEXT, and the recent CONVERSATION HISTORY, prioritized in that order, to answer the PLAYER'S CURRENT QUESTION.
 
         **CORE INSTRUCTIONS FOR ROBI:**
@@ -447,25 +404,18 @@ class RobiAssistant:
         retrieves context, generates prompt, gets answer.
         """
         player_view_img = None
-        image_size_info = "None"
         if player_view_img_data:
             try:
                 # Decode the base64 string
                 image_bytes = base64.b64decode(player_view_img_data)
                 # Load image from bytes using PIL
                 player_view_img = Image.open(io.BytesIO(image_bytes))
-                image_size_info = f"{player_view_img.size}"
             except Exception as e:
                 print(f"Error decoding/loading image from base64 data: {e}")
                 # Decide how to handle - maybe proceed without image?
                 player_view_img = None
-                image_size_info = "Error Loading"
 
 
-        print("--" * 50)
-        print(f"Received query: '{query}'")
-        print(f"Player view image: {image_size_info}") # Show size or status
-        print("--" * 50)
         start_time = asyncio.get_event_loop().time()
 
         # ... (Context retrieval remains the same using the 'query') ...
@@ -498,7 +448,10 @@ class RobiAssistant:
         # ... (Answer generation - ensure it uses the loaded player_view_img object) ...
         generation_start_time = asyncio.get_event_loop().time()
         # This call correctly passes the loaded PIL Image object (or None)
-        answer = await self._generate_answer_async([final_prompt, player_view_img])
+        if player_view_img:
+            answer = await self._generate_answer_async([final_prompt, player_view_img])
+        else:
+            answer = await self._generate_answer_async([final_prompt])
         generation_time = asyncio.get_event_loop().time() - generation_start_time
         print(f"Answer generation time: {generation_time:.4f} seconds")
 
